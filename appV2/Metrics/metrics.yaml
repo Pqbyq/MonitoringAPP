@@ -1,0 +1,89 @@
+# metrics-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metrics-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: metrics
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: metrics
+        version: v2
+    spec:
+      serviceAccountName: metrics-reader
+      containers:
+      - name: metrics-container
+        image: pqbq2137/metrics:latest
+        ports:
+        - containerPort: 5000
+
+---
+
+# metrics-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: metrics-service
+  namespace: default
+spec:
+  selector:
+    app: metrics
+    version: v2
+  ports:
+  - protocol: "TCP"
+    port: 80
+    targetPort: 5000
+  type: LoadBalancer
+
+
+---
+
+# metrics-reader-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  namespace: default
+  name: manage-pods
+rules:
+- apiGroups: ["*"]
+  resources: ["nodes", "services", "pods", "endpoints"]
+  verbs: ["get", "watch", "list", "create", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "watch", "list", "delete", "create"]
+
+---
+
+# metrics-reader-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+
+metadata:
+  name: manage-pods
+
+subjects:
+- kind: ServiceAccount
+  name: metrics-reader
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: manage-pods
+  apiGroup: rbac.authorization.k8s.io
+
+
+---
+
+# metrics-reader-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+
+metadata:
+  name: metrics-reader
+  namespace: default
+
