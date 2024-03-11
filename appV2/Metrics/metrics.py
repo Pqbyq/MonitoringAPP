@@ -1,3 +1,6 @@
+from msilib import Table
+import threading
+import time
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from kubernetes.config import ConfigException
@@ -6,6 +9,9 @@ from flask import Flask, render_template
 from logging.handlers import RotatingFileHandler
 import logging
 import os
+import psycopg2
+
+import sqlalchemy
 
 log_dir = '/var/log/metrics-app/'
 log_file = 'app.log'
@@ -83,6 +89,56 @@ def get_cluster_metrics(namespace=None):
             })
 
     return cluster_metrics
+
+def save_to_database(metrics):
+    # Połączenie z bazą danych PostgreSQL
+    db_engine = sqlalchemy.create_engine("postgresql://postgres:password@metrics-service:5432/db")
+    metadata = sqlalchemy.MetaData()
+
+    # Tabela metrics_table
+    metrics_table = Table('metrics_table', metadata,
+        sqlalchemy.Column('namespace', sqlalchemy.String),
+        sqlalchemy.Column('name', sqlalchemy.String),
+        sqlalchemy.Column('status', sqlalchemy.String),
+        sqlalchemy.Column('cpu_usage', sqlalchemy.Float),
+        sqlalchemy.Column('memory_usage', sqlalchemy.Float),
+        sqlalchemy.Column('timestamp', sqlalchemy.DateTime))
+
+    try:
+        # Utwórz połączenie
+        conn = db_engine.connect()
+
+        # Iteruj po metrykach i wstaw dane do tabeli
+        for metric in metrics:
+            conn.execute(metrics_table.insert().values(
+                namespace=metric['namespace'],
+                name=metric['name'],
+                status=metric['status'],
+                cpu_usage=metric['cpu_usage'],
+                memory_usage=metric['memory_usage'],
+                timestamp=datetime.strptime(metric['timestamp'], '%Y-%m-%d %H:%M:%S')
+            ))
+
+    except Exception as e:
+        app.logger.error(f"Błąd podczas zapisywania do bazy danych: {e}")
+
+    finally:
+        # Zamknij połączenie
+        conn.close()
+
+def update_metrics_periodically():
+    while True:
+        try:
+            metrics = get_cluster_metrics(namespace=None)
+            save_to_database(metrics)
+            time.sleep(30)  # Czekaj 30 sekund przed ponownym pobraniem danych
+        except ApiException as e:
+            app.logger.error("Error:", e)
+
+# Uruchom funkcję aktualizacji metryk w osobnym wątku
+update_thread = threading.Thread(target=update_metrics_periodically)
+update_thread.daemon = True
+update_thread.start()
 
 @app.route('/')
 def index():
